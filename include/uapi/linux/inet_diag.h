@@ -220,6 +220,15 @@ struct tcp_dctcp_info {
 	__u32	dctcp_ab_tot;
 };
 
+/* INET_DIAG_LGCINFO */
+
+struct tcp_lgc_info {
+	__u16	lgc_enabled;
+	__u64	lgc_rate;
+	__u32	lgc_ab_ecn;
+	__u32	lgc_ab_tot;
+};
+
 /* INET_DIAG_BBRINFO */
 
 struct tcp_bbr_info {
@@ -234,6 +243,7 @@ struct tcp_bbr_info {
 union tcp_cc_info {
 	struct tcpvegas_info	vegas;
 	struct tcp_dctcp_info	dctcp;
+	struct tcp_lgc_info	lgc;
 	struct tcp_bbr_info	bbr;
 };
 #endif /* _UAPI_INET_DIAG_H_ */
