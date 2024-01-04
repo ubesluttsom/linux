@@ -344,6 +344,17 @@ config NET_SCH_FQ_PIE
 
 	  If unsure, say N.
 
+config NET_SCH_SHQ
+	tristate "Shadow Queue scheduler"
+	help
+	  Say Y here if you want to use the Shadow Queue packet scheduling algorithm.
+	  For more information, please see https://www.ifi.uio.no
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called sch_shq.
+
+	  If unsure, say N.
+
 config NET_SCH_INGRESS
 	tristate "Ingress/classifier-action Qdisc"
 	depends on NET_CLS_ACT
@@ -440,6 +451,9 @@ choice
 
 	config DEFAULT_PFIFO_FAST
 		bool "Priority FIFO Fast"
+
+	config DEFAULT_SHQ
+		bool "Shadow Queue" if NET_SCH_SHQ
 endchoice
 
 config DEFAULT_NET_SCH
@@ -449,6 +463,7 @@ config DEFAULT_NET_SCH
 	default "fq_codel" if DEFAULT_FQ_CODEL
 	default "fq_pie" if DEFAULT_FQ_PIE
 	default "sfq" if DEFAULT_SFQ
+	default "shq" if DEFAULT_SHQ
 	default "pfifo_fast"
 endif
 

@@ -296,6 +296,7 @@ struct tc_red_qopt {
 struct tc_red_xstats {
 	__u32           early;          /* Early drops */
 	__u32           pdrop;          /* Drops due to queue limits */
+        __u64           qdelay;         /* current queuing delay */
 	__u32           other;          /* Drops due to drop() calls */
 	__u32           marked;         /* Marked packets */
 };
@@ -1060,6 +1061,46 @@ struct tc_fq_pie_xstats {
 	__u32 new_flows_len;	/* count of flows in new list */
 	__u32 old_flows_len;	/* count of flows in old list */
 	__u32 memory_usage;	/* total memory across all queues */
+};
+
+/* SHQ */
+enum {
+	TCA_SHQ_UNSPEC,
+	TCA_SHQ_LIMIT,
+	TCA_SHQ_INTERVAL,
+	TCA_SHQ_MAXP,
+	TCA_SHQ_ALPHA,
+	TCA_SHQ_BANDWIDTH,
+	TCA_SHQ_ECN,
+	__TCA_SHQ_MAX
+};
+#define TCA_SHQ_MAX   (__TCA_SHQ_MAX - 1)
+
+struct tc_shq_xstats {
+	__u64 prob;             /* current probability */
+        __u64 qdelay;           /* current queuing delay */
+	__u32 avg_rate;         /* current average dq_rate in bits/pie_time */
+	__u32 packets_in;       /* total number of packets enqueued */
+	__u32 dropped;          /* packets dropped due to shq_action */
+	__u32 overlimit;        /* dropped due to lack of space in queue */
+	__u16 maxq;             /* maximum queue size */
+	__u32 ecn_mark;         /* packets marked with ecn*/
+};
+
+/* MYFO */
+enum {
+	TCA_MYFO_UNSPEC,
+	TCA_MYFO_LIMIT,
+	__TCA_MYFO_MAX
+};
+#define TCA_MYFO_MAX   (__TCA_MYFO_MAX - 1)
+
+struct tc_myfo_xstats {
+	__u64 qdelay;	        /* current queuing delay */
+	__u32 packets_in;	/* total number of packets enqueued */
+	__u32 dropped;		/* packets dropped due to shq_action */
+	__u32 overlimit;	/* dropped due to full queue */
+	__u16 maxq;		/* maximum queue size */
 };
 
 /* CBS */
