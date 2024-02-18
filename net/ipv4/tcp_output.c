@@ -423,6 +423,7 @@ static inline bool tcp_urg_mode(const struct tcp_sock *tp)
 #define OPTION_SMC		BIT(9)
 #define OPTION_MPTCP		BIT(10)
 #define OPTION_AO		BIT(11)
+#define OPTION_LGCC		BIT(12)
 
 static void smc_options_write(__be32 *ptr, u16 *options)
 {
@@ -753,6 +754,18 @@ static void tcp_options_write(struct tcphdr *th, struct tcp_sock *tp,
 	smc_options_write(ptr, &options);
 
 	mptcp_options_write(th, ptr, tp, opts);
+
+	/* Add experimental LGCC option for advertising rate. Only sendt on
+         * ACKs. Make sure to align it properly too. */
+        if (th->ack && OPTION_LGCC & options) {
+                /* Hard code the rate for now. TODO */
+                u32 tmp_hardcoded_rate = 0xFFFF;
+                *ptr++ = htonl((TCPOPT_NOP << 24) |
+                               (TCPOPT_NOP << 16) |
+                               (TCPOPT_LGCC << 8) |
+                               TCPOLEN_LGCC);
+                *ptr++ = htonl(tmp_hardcoded_rate);
+        }
 }
 
 static void smc_set_option(const struct tcp_sock *tp,
@@ -884,6 +897,13 @@ static unsigned int tcp_syn_options(struct sock *sk, struct sk_buff *skb,
 		}
 	}
 
+	/* Enable LGCC TCP option *always* for now. Should probably make a
+         * proper sysctl option at some point. */
+	if (true /* skipping check */) {
+                opts->options |= OPTION_LGCC;
+                remaining -= TCPOLEN_LGCC;
+        }
+
 	bpf_skops_hdr_opt_len(sk, skb, NULL, NULL, 0, opts, &remaining);
 
 	return MAX_TCP_OPTION_SPACE - remaining;
@@ -957,6 +977,13 @@ static unsigned int tcp_synack_options(const struct sock *sk,
 
 	smc_set_option_cond(tcp_sk(sk), ireq, opts, &remaining);
 
+	/* Enable LGCC TCP option *always* for now. Should probably make a
+         * proper sysctl option at some point. TODO */
+	if (true /* skipping check */) {
+                opts->options |= OPTION_LGCC;
+                remaining -= TCPOLEN_LGCC_ALIGNED;
+        }
+
 	bpf_skops_hdr_opt_len((struct sock *)sk, skb, req, syn_skb,
 			      synack_type, opts, &remaining);
 
@@ -1025,6 +1052,13 @@ static unsigned int tcp_established_options(struct sock *sk, struct sk_buff *skb
 		size += TCPOLEN_SACK_BASE_ALIGNED +
 			opts->num_sack_blocks * TCPOLEN_SACK_PERBLOCK;
 	}
+
+	/* Enable LGCC TCP option *always* for now. Should probably make a
+         * proper sysctl option at some point. TODO */
+	if (true /* skipping check */) {
+                opts->options |= OPTION_LGCC;
+                size +=  TCPOLEN_LGCC_ALIGNED;
+        }
 
 	if (unlikely(BPF_SOCK_OPS_TEST_FLAG(tp,
 					    BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG))) {
