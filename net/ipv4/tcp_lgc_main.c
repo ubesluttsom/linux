@@ -24,6 +24,7 @@
 #include <net/tcp.h>
 #include <linux/inet_diag.h>
 #include "tcp_lgc.h"
+#include <linux/printk.h> /* For debugging. TODO: remove. */
 
 #define LGC_SHIFT	16
 #define ONE		(1U<<16)
@@ -35,6 +36,7 @@ struct lgc {
 	u32 old_delivered_ce;
 	u32 next_seq;
 	u64 rate;
+	u32 rate_prev_loop;
 	u64 max_rateS;
 	u32 mrate;
 	u64 exp_rate;
@@ -276,6 +278,22 @@ static void lgc_set_cwnd(struct sock *sk)
 	WRITE_ONCE(ca->rate, target);
 }
 
+/* Parse TCP option, and store the advertized rate in the CA state. */
+static void tcp_parse_lgcc_option(const struct tcp_sock *tp, struct lgc *ca)
+{
+        pr_info("LGCC: Setting rate_prev_loop to %u\n", tp->rx_opt.lgcc_rate);
+	WRITE_ONCE(ca->rate_prev_loop, tp->rx_opt.lgcc_rate);
+}
+
+/* Send the rate we would like to advertise (for the LGCC TCP option). */
+u32 tcp_lgcc_get_rate(struct tcp_sock *tp)
+{
+        /* TODO: this is super ugly. Does there exist an interface to cast
+         * this correctly? */
+        return min(((struct lgc *)(tp->inet_conn.icsk_ca_priv))->rate, U32_MAX);
+}
+EXPORT_SYMBOL(tcp_lgcc_get_rate);
+
 static void tcp_lgc_main(struct sock *sk, const struct rate_sample *rs)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -287,6 +305,7 @@ static void tcp_lgc_main(struct sock *sk, const struct rate_sample *rs)
 		if (unlikely(!ca->rate_eval))
 			lgc_init_rate(sk);
 
+                tcp_parse_lgcc_option(tp, ca);
 		lgc_update_rate(sk);
 		lgc_set_cwnd(sk);
 		lgc_reset(tp, ca);

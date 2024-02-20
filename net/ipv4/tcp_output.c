@@ -47,6 +47,8 @@
 
 #include <trace/events/tcp.h>
 
+#include "tcp_lgc.h"
+
 /* Refresh clocks of a TCP socket,
  * ensuring monotically increasing values.
  */
@@ -758,13 +760,11 @@ static void tcp_options_write(struct tcphdr *th, struct tcp_sock *tp,
 	/* Add experimental LGCC option for advertising rate. Only sendt on
          * ACKs. Make sure to align it properly too. */
         if (th->ack && OPTION_LGCC & options) {
-                /* Hard code the rate for now. TODO */
-                u32 tmp_hardcoded_rate = 0xFFFF;
                 *ptr++ = htonl((TCPOPT_NOP << 24) |
                                (TCPOPT_NOP << 16) |
                                (TCPOPT_LGCC << 8) |
                                TCPOLEN_LGCC);
-                *ptr++ = htonl(tmp_hardcoded_rate);
+                *ptr++ = htonl(tp ? tcp_lgcc_get_rate(tp) : 0);
         }
 }
 

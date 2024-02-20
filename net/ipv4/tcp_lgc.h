@@ -3,6 +3,7 @@
 
 #include <linux/types.h>
 #include <net/net_namespace.h>
+#include <net/tcp.h>
 
 #define LGC_LUT_SIZE 65537U
 extern const u32 log_lut[LGC_LUT_SIZE];
@@ -17,5 +18,7 @@ inline u32 lgc_exp_lut_lookup(u32);
 
 inline int lgc_register_sysctl(void);
 inline void lgc_unregister_sysctl(void);
+
+u32 tcp_lgcc_get_rate(struct tcp_sock *tp);
 
 #endif

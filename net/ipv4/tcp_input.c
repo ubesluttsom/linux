@@ -80,6 +80,7 @@
 #include <linux/jump_label_ratelimit.h>
 #include <net/busy_poll.h>
 #include <net/mptcp.h>
+#include "tcp_lgc.h"
 
 int sysctl_tcp_max_orphans __read_mostly = NR_FILE;
 
@@ -4234,6 +4235,15 @@ void tcp_parse_options(const struct net *net,
 					break;
 
 				opt_rx->saw_unknown = 1;
+				break;
+
+			case TCPOPT_LGCC:
+                                /* TODO: should check sysctl option too */
+                                /* TODO: should check if `estab` */
+                                if (opsize == TCPOLEN_LGCC && (th->ack || th->syn)) {
+                                        opt_rx->lgcc_ok = true;
+                                        opt_rx->lgcc_rate = get_unaligned_be32(ptr);
+                                }
 				break;
 
 			default:
