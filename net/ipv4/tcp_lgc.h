@@ -19,6 +19,6 @@ inline u32 lgc_exp_lut_lookup(u32);
 inline int lgc_register_sysctl(void);
 inline void lgc_unregister_sysctl(void);
 
-u32 tcp_lgcc_get_rate(struct tcp_sock *tp);
+u64 tcp_lgcc_get_rate(struct tcp_sock *tp);
 
 #endif

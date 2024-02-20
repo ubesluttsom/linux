@@ -128,7 +128,7 @@ struct tcp_options_received {
 	u8	num_sacks;	/* Number of SACK blocks		*/
 	u16	user_mss;	/* mss requested by user in ioctl	*/
 	u16	mss_clamp;	/* Maximal mss, negotiated at connection setup */
-        u32     lgcc_rate;      /* LGCC rate received on last ACK       */
+        u64     lgcc_rate;      /* LGCC rate received on last ACK       */
 };
 
 static inline void tcp_clear_options(struct tcp_options_received *rx_opt)

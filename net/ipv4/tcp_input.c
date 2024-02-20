@@ -4242,7 +4242,7 @@ void tcp_parse_options(const struct net *net,
                                 /* TODO: should check if `estab` */
                                 if (opsize == TCPOLEN_LGCC && (th->ack || th->syn)) {
                                         opt_rx->lgcc_ok = true;
-                                        opt_rx->lgcc_rate = get_unaligned_be32(ptr);
+                                        opt_rx->lgcc_rate = get_unaligned_be64(ptr);
                                 }
 				break;
 
