@@ -148,6 +148,7 @@ enum {
 	 */
 
 	INET_DIAG_DCTCPINFO,	/* request as INET_DIAG_VEGASINFO */
+	INET_DIAG_LGCINFO,	/* request as INET_DIAG_VEGASINFO */
 	INET_DIAG_PROTOCOL,	/* response attribute only */
 	INET_DIAG_SKV6ONLY,
 	INET_DIAG_LOCALS,
