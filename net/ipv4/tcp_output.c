@@ -758,15 +758,15 @@ static void tcp_options_write(struct tcphdr *th, struct tcp_sock *tp,
 	mptcp_options_write(th, ptr, tp, opts);
 
 	/* Add experimental LGCC option for advertising rate. Only sendt on
-         * ACKs. Make sure to align it properly too. */
-        if (th->ack && OPTION_LGCC & options) {
-                u64 rate = tp ? tcp_lgcc_get_rate(tp) : 0;
+         * ACKs and SYNs. Make sure to align it properly too. */
+	if (OPTION_LGCC & options) {
+		u64 rate = tp ? tcp_lgcc_get_rate(tp) : 0xAFFFFFFFFFFFFFFA;
                 *ptr++ = htonl((TCPOPT_NOP << 24) |
-                               (TCPOPT_NOP << 16) |
-                               (TCPOPT_LGCC << 8) |
-                               TCPOLEN_LGCC);
-                *ptr++ = htonl(rate >> 32);
-                *ptr++ = htonl(rate & 0xFFFFFFFF);
+                                (TCPOPT_NOP << 16) |
+                                (TCPOPT_LGCC << 8) |
+                                TCPOLEN_LGCC);
+                *ptr++ = htonl((rate >> 32) & 0x00000000FFFFFFFF);
+                *ptr++ = htonl( rate        & 0x00000000FFFFFFFF);
         }
 }
 
@@ -899,9 +899,14 @@ static unsigned int tcp_syn_options(struct sock *sk, struct sk_buff *skb,
 		}
 	}
 
-	/* Enable LGCC TCP option *always* for now. Should probably make a
-         * proper sysctl option at some point. */
-	if (true /* skipping check */) {
+	/* Enable LGCC TCP option if using LGC as congestion control. */
+	/* TODO: Does `sock_net(sk)->ipv4.tcp_congestion_control->name` need
+         * a `READ_ONCE(...)` wrapper? */
+	/* TODO: This check is probably slow. */
+	/* We also need to check if we have space in the header. */
+	const char *cc_name = sock_net(sk)->ipv4.tcp_congestion_control->name;
+        if (unlikely(strcmp("lgc", cc_name) == 0) &&
+                        (remaining >= TCPOLEN_LGCC_ALIGNED)) {
                 opts->options |= OPTION_LGCC;
                 remaining -= TCPOLEN_LGCC_ALIGNED;
         }
@@ -979,11 +984,16 @@ static unsigned int tcp_synack_options(const struct sock *sk,
 
 	smc_set_option_cond(tcp_sk(sk), ireq, opts, &remaining);
 
-	/* Enable LGCC TCP option *always* for now. Should probably make a
-         * proper sysctl option at some point. TODO */
-	if (true /* skipping check */) {
-                opts->options |= OPTION_LGCC;
-                remaining -= TCPOLEN_LGCC_ALIGNED;
+	/* Enable LGCC TCP option if LGCC option has been recieved. */
+        if (ireq->lgcc_ok) {
+                /* TODO: This check is probably slow. */
+                const char *cc_name = sock_net(sk)->ipv4.tcp_congestion_control->name;
+                /* We also need to check if we have space in the header */
+                if ((remaining >= TCPOLEN_LGCC_ALIGNED) &&
+                                (strcmp("lgc", cc_name) == 0)) {
+                        opts->options |= OPTION_LGCC;
+                        remaining -= TCPOLEN_LGCC_ALIGNED;
+                }
         }
 
 	bpf_skops_hdr_opt_len((struct sock *)sk, skb, req, syn_skb,
@@ -1055,11 +1065,17 @@ static unsigned int tcp_established_options(struct sock *sk, struct sk_buff *skb
 			opts->num_sack_blocks * TCPOLEN_SACK_PERBLOCK;
 	}
 
-	/* Enable LGCC TCP option *always* for now. Should probably make a
-         * proper sysctl option at some point. TODO */
-	if (true /* skipping check */) {
-                opts->options |= OPTION_LGCC;
-                size +=  TCPOLEN_LGCC_ALIGNED;
+        /* Enable LGCC TCP option. */
+        if (tp->rx_opt.lgcc_ok) {
+                /* TODO: This check is probably slow. */
+                const char *cc_name = sock_net(sk)->ipv4.tcp_congestion_control->name;
+                /* We also need to check if we have space in the header. */
+                unsigned int remaining = MAX_TCP_OPTION_SPACE - size;
+                if ((remaining >= TCPOLEN_LGCC_ALIGNED) &&
+                                (strcmp("lgc", cc_name) == 0)) {
+                        opts->options |= OPTION_LGCC;
+                        size +=  TCPOLEN_LGCC_ALIGNED;
+                }
         }
 
 	if (unlikely(BPF_SOCK_OPS_TEST_FLAG(tp,

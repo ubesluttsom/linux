@@ -80,7 +80,6 @@
 #include <linux/jump_label_ratelimit.h>
 #include <net/busy_poll.h>
 #include <net/mptcp.h>
-#include "tcp_lgc.h"
 
 int sysctl_tcp_max_orphans __read_mostly = NR_FILE;
 
@@ -4237,14 +4236,14 @@ void tcp_parse_options(const struct net *net,
 				opt_rx->saw_unknown = 1;
 				break;
 
-			case TCPOPT_LGCC:
-                                /* TODO: should check sysctl option too */
-                                /* TODO: should check if `estab` */
-                                if (opsize == TCPOLEN_LGCC && (th->ack || th->syn)) {
-                                        opt_rx->lgcc_ok = true;
-                                        opt_rx->lgcc_rate = get_unaligned_be64(ptr);
-                                }
-				break;
+            case TCPOPT_LGCC:
+                /* TODO: should check sysctl option too */
+                /* TODO: should check if `estab` */
+                if (opsize == TCPOLEN_LGCC) {
+                        opt_rx->lgcc_ok = 1;
+                        opt_rx->lgcc_rate = get_unaligned_be64(ptr);
+                }
+                break;
 
 			default:
 				opt_rx->saw_unknown = 1;
@@ -6970,6 +6969,7 @@ static void tcp_openreq_init(struct request_sock *req,
 	ireq->wscale_ok = rx_opt->wscale_ok;
 	ireq->acked = 0;
 	ireq->ecn_ok = 0;
+	ireq->lgcc_ok = rx_opt->lgcc_ok;   /* Experimental LGCC option */
 	ireq->ir_rmt_port = tcp_hdr(skb)->source;
 	ireq->ir_num = ntohs(tcp_hdr(skb)->dest);
 	ireq->ir_mark = inet_request_mark(sk, skb);
