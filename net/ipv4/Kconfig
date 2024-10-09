@@ -669,6 +669,13 @@ config TCP_CONG_LGC
 	  For further details see:
 	    https://www.mn.uio.no/ifi/english/research/projects/ocarina/
 
+config TCP_CONG_LGCC
+	tristate "LGCC"
+	default n
+	help
+	  My own congestion control module! A work-in-progress! Not for
+	  production use!
+
 config TCP_CONG_CDG
 	tristate "CAIA Delay-Gradient (CDG)"
 	default n
@@ -734,6 +741,9 @@ choice
 	config DEFAULT_LGC
 		bool "LGC" if TCP_CONG_LGC=y
 
+	config DEFAULT_LGCC
+		bool "LGCC" if TCP_CONG_LGCC=y
+
 	config DEFAULT_CDG
 		bool "CDG" if TCP_CONG_CDG=y
 
@@ -763,6 +773,7 @@ config DEFAULT_TCP_CONG
 	default "reno" if DEFAULT_RENO
 	default "dctcp" if DEFAULT_DCTCP
 	default "lgc" if DEFAULT_LGC
+	default "lgcc" if DEFAULT_LGCC
 	default "cdg" if DEFAULT_CDG
 	default "bbr" if DEFAULT_BBR
 	default "cubic"
