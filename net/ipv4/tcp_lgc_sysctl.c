@@ -32,13 +32,7 @@ static struct ctl_table lgc_table[] = {
                 .mode	      = 0644,
                 .proc_handler = proc_dointvec,
         },
-        {
-                .procname     = "lgc_min_rtt",
-                .data	      = &sysctl_lgc_min_rtt,
-                .maxlen	      = sizeof(sysctl_lgc_min_rtt),
-                .mode	      = 0644,
-                .proc_handler = proc_dointvec,
-        },
+        {}
 };
 
 /*

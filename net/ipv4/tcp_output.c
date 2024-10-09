@@ -47,7 +47,7 @@
 
 #include <trace/events/tcp.h>
 
-#include "tcp_lgc.h"
+#include "tcp_lgcc.h"
 
 /* Refresh clocks of a TCP socket,
  * ensuring monotically increasing values.
