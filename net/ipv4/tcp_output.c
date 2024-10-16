@@ -899,13 +899,13 @@ static unsigned int tcp_syn_options(struct sock *sk, struct sk_buff *skb,
 		}
 	}
 
-	/* Enable LGCC TCP option if using LGC as congestion control. */
+	/* Enable LGCC TCP option if using LGCC as congestion control. */
 	/* TODO: Does `sock_net(sk)->ipv4.tcp_congestion_control->name` need
          * a `READ_ONCE(...)` wrapper? */
 	/* TODO: This check is probably slow. */
 	/* We also need to check if we have space in the header. */
 	const char *cc_name = sock_net(sk)->ipv4.tcp_congestion_control->name;
-        if (unlikely(strcmp("lgc", cc_name) == 0) &&
+        if (unlikely(strcmp("lgcc", cc_name) == 0) &&
                         (remaining >= TCPOLEN_LGCC_ALIGNED)) {
                 opts->options |= OPTION_LGCC;
                 remaining -= TCPOLEN_LGCC_ALIGNED;
@@ -990,7 +990,7 @@ static unsigned int tcp_synack_options(const struct sock *sk,
                 const char *cc_name = sock_net(sk)->ipv4.tcp_congestion_control->name;
                 /* We also need to check if we have space in the header */
                 if ((remaining >= TCPOLEN_LGCC_ALIGNED) &&
-                                (strcmp("lgc", cc_name) == 0)) {
+                                (strcmp("lgcc", cc_name) == 0)) {
                         opts->options |= OPTION_LGCC;
                         remaining -= TCPOLEN_LGCC_ALIGNED;
                 }
@@ -1072,7 +1072,7 @@ static unsigned int tcp_established_options(struct sock *sk, struct sk_buff *skb
                 /* We also need to check if we have space in the header. */
                 unsigned int remaining = MAX_TCP_OPTION_SPACE - size;
                 if ((remaining >= TCPOLEN_LGCC_ALIGNED) &&
-                                (strcmp("lgc", cc_name) == 0)) {
+                                (strcmp("lgcc", cc_name) == 0)) {
                         opts->options |= OPTION_LGCC;
                         size +=  TCPOLEN_LGCC_ALIGNED;
                 }

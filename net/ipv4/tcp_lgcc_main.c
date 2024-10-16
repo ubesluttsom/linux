@@ -22,7 +22,8 @@ struct lgcc {
 	u32 old_delivered_ce;
 	u32 next_seq;
 	u64 rate;
-	u64 rate_prev_loop;
+	u64 rate_prev_loop_router_updated;
+	u64 rate_prev_loop_ack_updated;
 	u64 max_rateS;
 	u32 mrate;
 	u64 exp_rate;
@@ -89,6 +90,10 @@ static void tcp_lgcc_init(struct sock *sk)
 		ca->minRTT    = sysctl_lgcc_min_rtt[0];
 		ca->fraction  = 0U;
 
+		/* Set the "previous" control loop rate to be the maximum possible value. This is to ensure we won't do rate calculations based off it, when not set by a LGCC router, since LGCC's rate algorithm does a `min(rate_prev_loop, ...)`. */
+		ca->rate_prev_loop_router_updated = ULLONG_MAX;
+		ca->rate_prev_loop_ack_updated = ULLONG_MAX;
+
 		/* Needed for the DCTCP state machine */
 		ca->prior_rcv_nxt = tp->rcv_nxt;
 
@@ -109,6 +114,9 @@ static void lgcc_init_rate(struct sock *sk)
 	u64 init_rate = (u64)(tp->snd_cwnd * tp->mss_cache * 1000);
 	init_rate <<= LGCC_SHIFT; // scale the value with LGCC_SHIFT bits
 	do_div(init_rate, ca->minRTT);
+
+	ca->rate_prev_loop_router_updated = ULLONG_MAX;
+	ca->rate_prev_loop_ack_updated = ULLONG_MAX;
 
 	ca->rate = init_rate;
 	ca->rate_eval = 1;
@@ -175,14 +183,20 @@ static void lgcc_update_rate(struct sock *sk)
 
 	 *            - log2(rate/max_rate)    -log2(1-fraction)
 	 * gradient = --------------------- - ------------------
-         *                 log2(phi1)             log2(phi2)
+	 *                 log2(phi1)             log2(phi2)
 	 */
 
 	if (!ca->mrate) /* `mrate` is in bytes per millisecond */
 		ca->mrate = 1250000U; // FIXME; Reset the rate value to 10Gbps
 	/* do_div(tmprate, ca->mrate); */
-	do_div(tmprate, min(ca->rate_prev_loop >> LGCC_SHIFT, ca->mrate));
-	/* Note to future Martin: I'm *very* certain the shift above is in the correct direction! --Martin */
+
+	/* Use the most congested signal, i.e the one with the lowest advertised rate */
+	u64 rate_prev_loop = min(ca->rate_prev_loop_router_updated, ca->rate_prev_loop_ack_updated);
+	rate_prev_loop >>= LGCC_SHIFT;
+	/* Note to future Martin: I'm *very* certain the shift above is in the
+	 * correct direction! --Martin */
+
+	do_div(tmprate, min(rate_prev_loop, ca->mrate));
 
 	u32 first_term = lgc_log_lut_lookup((u32)tmprate);
 	u32 second_term = lgc_log_lut_lookup((u32)(65536U - ca->fraction));
@@ -190,29 +204,6 @@ static void lgcc_update_rate(struct sock *sk)
 	s32 gradient = first_term - second_term;
 
 	gr = lgc_pow_lut_lookup(delivered_ce); /* LGCC_SHIFT scaled */
-
-	/* s32 lgcc_r = (s32)gr; */
-	/* if (gr < 12451 && ca->fraction) { */
-	/* 	u32 exp = lgc_exp_lut_lookup(ca->fraction); */
-	/* 	s64 expRate = (s64)ca->max_rate; */
-	/* 	expRate *= exp; */
-	/* 	s64 crate = (s64)ca->rate; */
-	/* 	s64 delta; */
-
-	/* 	if (expRate > ca->exp_rate && ca->rate < expRate - ca->exp_rate && */
-	/* 	    ca->rate < ca->max_rateS) { */
-	/* 		delta = expRate - crate; */
-	/* 		delta /= ca->max_rate; */
-	/* 		lgcc_r = (s32)delta; */
-	/* 	} else if (ca->rate > expRate + ca->exp_rate) { */
-	/* 		if (gradient < 0) { */
-	/* 			delta = crate - expRate; */
-	/* 			delta /= ca->max_rate; */
-	/* 			lgcc_r = (s32)delta; */
-	/* 		} */
-	/* 	} else if ( expRate < ca->max_rateS) */
-	/* 			lgcc_r = (s32)(984); */
-	/* } */
 
 	gr_rate_gradient *= gr;
 	gr_rate_gradient *= rate;	/* rate: bpms << LGCC_SHIFT */
@@ -239,6 +230,8 @@ static void lgcc_update_rate(struct sock *sk)
 	 * as a temporary variable in prior operations.
 	 */
 	WRITE_ONCE(ca->rate, rate);
+
+        /* printk(KERN_DEBUG "LGCC: lgcc_update_rate: 0x%llx\n", ca->rate); */
 }
 
 /* Calculate cwnd based on current rate and minRTT
@@ -249,19 +242,11 @@ static void lgcc_set_cwnd(struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct lgcc *ca = inet_csk_ca(sk);
 
-        /* Small chance of printing the calculations */
-        bool print_calculation = (get_random_u32() % 300 == 0) ? 1 : 0;
-        if (print_calculation) printk(KERN_DEBUG "LGCC: lgcc_set_cwnd():\n");
-
 	u64 target = (u64)(ca->rate * ca->minRTT);
 	target >>= LGCC_SHIFT;
 	do_div(target, tp->mss_cache * 1000);
-        if (print_calculation) printk(KERN_DEBUG " | ca->minRTT = 0x%llx\n", ca->minRTT);
-        if (print_calculation) printk(KERN_DEBUG " | target = 0x%llx\n", target);
 
 	tp->snd_cwnd = max_t(u32, (u32)target + 1, 10U);
-        if (print_calculation) printk(KERN_DEBUG " | tp->snd_cwnd = 0x%llx\n", tp->snd_cwnd);
-        if (print_calculation) printk(KERN_DEBUG " | tp->snd_cwnd_clamp = 0x%llx\n", tp->snd_cwnd_clamp);
 
 	if (tp->snd_cwnd > tp->snd_cwnd_clamp)
 		tp->snd_cwnd = tp->snd_cwnd_clamp;
@@ -269,27 +254,46 @@ static void lgcc_set_cwnd(struct sock *sk)
 	target = (u64)(tp->snd_cwnd * tp->mss_cache * 1000);
 	target <<= LGCC_SHIFT;
 	do_div(target, ca->minRTT);
-        /* if (print_calculation) printk(KERN_DEBUG " | target = 0x%llx (again)\n", target); */
 
 	WRITE_ONCE(ca->rate, target);
 }
 
-/* Parse TCP option, and store the advertized rate in the CA state. */
+/* Get the rate of the last rate, as advertised in the last received ACK. This is executed every time we recieve an ACK. */
+void tcp_lgcc_get_rate_prev_loop(struct sock *sk, u32 flags)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct lgcc *ca = inet_csk_ca(sk);
+
+        /* TODO: should this be dampened? (Peymant's code multiplies by 0.8, I think.) */
+	WRITE_ONCE(ca->rate_prev_loop_ack_updated, tp->rx_opt.lgcc_rate);
+        /* if (get_random_u32() % 1000 == 0) */
+        /*         printk(KERN_DEBUG "LGCC: recieved rate from ACK: 0x%llx\n", ca->rate_prev_loop_ack_updated); */
+}
+
+/* Parse TCP option, and store the advertized rate in the CA state. Called by the LGCC router (PEP-DNA). */
 void tcp_lgcc_set_rate_prev_loop(struct tcp_sock *from, struct sock *to)
 {
         struct lgcc *ca = inet_csk_ca(to);
-        /* if (get_random_u32() % 300 == 0) */
-        /*         printk(KERN_DEBUG "LGCC: setting rate_prev_loop to 0x%llx (random)\n", from->rx_opt.lgcc_rate); */
-        WRITE_ONCE(ca->rate_prev_loop, from->rx_opt.lgcc_rate);
+
+        /* I suspect this is wrong: */
+        /* WRITE_ONCE(ca->rate_prev_loop, from->rx_opt.lgcc_rate); */
+
+        /* This might be right, though: */
+        WRITE_ONCE(ca->rate_prev_loop_router_updated, ((struct lgcc *)(from->inet_conn.icsk_ca_priv))->rate);
+
+        /* if (get_random_u32() % 1000 == 0) */
+        /*         printk(KERN_DEBUG "LGCC: setting rate_prev_loop_router_updated: 0x%llx\n", ((struct lgcc *)(from->inet_conn.icsk_ca_priv))->rate); */
 }
 EXPORT_SYMBOL(tcp_lgcc_set_rate_prev_loop);
 
-/* Send the rate we would like to advertise (for the LGCC TCP option). */
+/* Send the rate we would like to advertise (for the LGCC TCP option). Called by the TCP (output) stack. */
 u64 tcp_lgcc_get_rate(struct tcp_sock *tp)
 {
+        /* if (get_random_u32() % 1000 == 0) */
+        /*         printk(KERN_DEBUG "LGCC: advertising in ACK: 0x%llx\n", ((struct lgcc *)(tp->inet_conn.icsk_ca_priv))->rate_prev_loop_router_updated); */
         /* TODO: this is super ugly. Does there exist an interface to cast
          * this correctly? */
-        return ((struct lgcc *)(tp->inet_conn.icsk_ca_priv))->rate;
+        return ((struct lgcc *)(tp->inet_conn.icsk_ca_priv))->rate_prev_loop_router_updated;
 }
 EXPORT_SYMBOL(tcp_lgcc_get_rate);
 
@@ -328,20 +332,17 @@ static void tcp_lgcc_main(struct sock *sk, const struct rate_sample *rs)
 	/* Expired RTT */
 	if (!before(tp->snd_una, ca->next_seq)) {
 
-		ca->minRTT = min_not_zero(tcp_min_rtt(tp), ca->minRTT);
-		/* The above is disabled, since the use of a PEP in LGCC mess with the
-                 * built-in min-RTT calculation. We have to assume the sysctl setting
-                 * is correct instead.   --Martin */
+		/* ca->minRTT = min_not_zero(tcp_min_rtt(tp), ca->minRTT); */
+		/* The above may be disabled, since the use of a PEP in LGCC mess with the
+		 * built-in min-RTT calculation. We have to assume the sysctl setting
+		 * is correct instead.   --Martin */
 
 		if (unlikely(!ca->rate_eval))
 			lgcc_init_rate(sk);
 
-                /* TODO: My intuition is that this should should only be done by a PEP
-                 * router. Therefore I'm commenting this out for now.   --Martin */
-                /* tcp_lgcc_set_rate_prev_loop(tp, sk); */
 		lgcc_update_rate(sk);
 		lgcc_set_cwnd(sk);
-                lgcc_update_pacing_rate(sk);
+                /* lgcc_update_pacing_rate(sk); */
 		lgcc_reset(tp, ca);
 	}
 }
@@ -375,6 +376,7 @@ static struct tcp_congestion_ops lgcc __read_mostly = {
 	.init		= tcp_lgcc_init,
 	.cong_control	= tcp_lgcc_main,
 	.cwnd_event	= lgcc_cwnd_event,
+	.in_ack_event	= tcp_lgcc_get_rate_prev_loop,
 	.ssthresh	= tcp_reno_ssthresh,
 	.undo_cwnd	= tcp_reno_undo_cwnd,
 	.get_info	= tcp_lgcc_get_info,
