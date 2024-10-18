@@ -24,6 +24,13 @@ static struct ctl_table lgcc_table[] = {
                 .mode	      = 0644,
                 .proc_handler = proc_dointvec,
         },
+        {
+                .procname     = "lgcc_static_rtt",
+                .data	      = &sysctl_lgcc_static_rtt,
+                .maxlen	      = sizeof(sysctl_lgcc_static_rtt),
+                .mode	      = 0644,
+                .proc_handler = proc_dointvec,
+        },
 };
 
 inline int lgcc_register_sysctl(void)

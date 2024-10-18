@@ -7,6 +7,7 @@
 
 extern int sysctl_lgcc_max_rate[1] __read_mostly;
 extern int sysctl_lgcc_min_rtt[1] __read_mostly;
+extern int sysctl_lgcc_static_rtt[1] __read_mostly;
 
 inline int lgcc_register_sysctl(void);
 inline void lgcc_unregister_sysctl(void);

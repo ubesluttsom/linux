@@ -28,6 +28,7 @@ struct lgcc {
 	u32 mrate;
 	u64 exp_rate;
 	u32 minRTT;
+	u32 static_rtt;
 	u32 fraction;
 	u8  rate_eval:1;
         /* For the DCTCP state machine */
@@ -49,6 +50,7 @@ MODULE_PARM_DESC(thresh_16, "scaled thresh");
 
 int sysctl_lgcc_max_rate[1] __read_mostly;	    /* min/default/max */
 int sysctl_lgcc_min_rtt[1] __read_mostly;	    /* unit is microseconds (us) */
+int sysctl_lgcc_static_rtt[1] __read_mostly;	    /* boolean */
 
 static void lgcc_reset(const struct tcp_sock *tp, struct lgcc *ca)
 {
@@ -86,9 +88,13 @@ static void tcp_lgcc_init(struct sock *sk)
 		ca->exp_rate  = (u64)(ca->mrate * 3277U); // *= 0.05 << LGCC_SHIFT
 		ca->rate_eval = 0;
 		ca->rate      = 65536ULL;
+
 		/* ca->minRTT    = 1U<<20; /1* reference of minRTT ever seen ~1s *1/ */
 		ca->minRTT    = sysctl_lgcc_min_rtt[0];
 		ca->fraction  = 0U;
+
+                /* If false, update min RTT dynamically with measurements from the TCP stack */
+		ca->static_rtt = sysctl_lgcc_static_rtt[0];
 
 		/* Set the "previous" control loop rate to be the maximum possible value. This is to ensure we won't do rate calculations based off it, when not set by a LGCC router, since LGCC's rate algorithm does a `min(rate_prev_loop, ...)`. */
 		ca->rate_prev_loop_router_updated = ULLONG_MAX;
@@ -246,7 +252,7 @@ static void lgcc_set_cwnd(struct sock *sk)
 	target >>= LGCC_SHIFT;
 	do_div(target, tp->mss_cache * 1000);
 
-	tp->snd_cwnd = max_t(u32, (u32)target + 1, 10U);
+	tp->snd_cwnd = max_t(u32, (u32)target + 1, 2U);
 
 	if (tp->snd_cwnd > tp->snd_cwnd_clamp)
 		tp->snd_cwnd = tp->snd_cwnd_clamp;
@@ -258,7 +264,8 @@ static void lgcc_set_cwnd(struct sock *sk)
 	WRITE_ONCE(ca->rate, target);
 }
 
-/* Get the rate of the last rate, as advertised in the last received ACK. This is executed every time we recieve an ACK. */
+/* Get the rate of the last rate, as advertised in the last received ACK. This
+ * is executed every time we receive an ACK. */
 void tcp_lgcc_get_rate_prev_loop(struct sock *sk, u32 flags)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -324,6 +331,17 @@ __bpf_kfunc static void lgcc_cwnd_event(struct sock *sk, enum tcp_ca_event ev)
         lgcc_update_rate(sk);
 }
 
+/* XXX: A bit unsure if this is needed, and how to implement this. Now it
+ * effectively removes slow start, I guess? This TCP module affects rate
+ * via the cwnd primarily, not ssthresh. */
+static u32 tcp_lgcc_ssthresh(struct sock *sk)
+{
+	struct lgcc *ca = inet_csk_ca(sk);
+	struct tcp_sock *tp = tcp_sk(sk);
+
+	return max(tcp_snd_cwnd(tp), 2U);
+}
+
 static void tcp_lgcc_main(struct sock *sk, const struct rate_sample *rs)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -332,7 +350,8 @@ static void tcp_lgcc_main(struct sock *sk, const struct rate_sample *rs)
 	/* Expired RTT */
 	if (!before(tp->snd_una, ca->next_seq)) {
 
-		/* ca->minRTT = min_not_zero(tcp_min_rtt(tp), ca->minRTT); */
+                if (ca->static_rtt != 0)
+                        ca->minRTT = min_not_zero(tcp_min_rtt(tp), ca->minRTT);
 		/* The above may be disabled, since the use of a PEP in LGCC mess with the
 		 * built-in min-RTT calculation. We have to assume the sysctl setting
 		 * is correct instead.   --Martin */
@@ -377,7 +396,7 @@ static struct tcp_congestion_ops lgcc __read_mostly = {
 	.cong_control	= tcp_lgcc_main,
 	.cwnd_event	= lgcc_cwnd_event,
 	.in_ack_event	= tcp_lgcc_get_rate_prev_loop,
-	.ssthresh	= tcp_reno_ssthresh,
+	.ssthresh	= tcp_lgcc_ssthresh,
 	.undo_cwnd	= tcp_reno_undo_cwnd,
 	.get_info	= tcp_lgcc_get_info,
 	.flags		= TCP_CONG_NEEDS_ECN,
@@ -391,6 +410,7 @@ static int __init lgcc_register(void)
 	lgcc_register_sysctl();
 	sysctl_lgcc_max_rate[0] = 1000;
 	sysctl_lgcc_min_rtt[0] = 1U<<20;   /* ~1s */
+	sysctl_lgcc_static_rtt[0] = false;
 	return tcp_register_congestion_control(&lgcc);
 }
 
