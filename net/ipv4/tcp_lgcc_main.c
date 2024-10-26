@@ -34,6 +34,8 @@ struct lgcc {
         /* For the DCTCP state machine */
         u32 prior_rcv_nxt;
         u32 ce_state;
+        /* Debug flag */
+        u32 debug;
 };
 
 /* Module parameters */
@@ -197,12 +199,22 @@ static void lgcc_update_rate(struct sock *sk)
 	/* do_div(tmprate, ca->mrate); */
 
 	/* Use the most congested signal, i.e the one with the lowest advertised rate */
-	u64 rate_prev_loop = min(ca->rate_prev_loop_router_updated, ca->rate_prev_loop_ack_updated);
-	rate_prev_loop >>= LGCC_SHIFT;
+	u64 rate_prev_loop = min(ca->rate_prev_loop_ack_updated, ca->max_rateS);
+        if (ca->debug) {
+                printk(KERN_DEBUG "LGCC: %p: | lgcc_update_rate(): \n", ca);
+                printk(KERN_DEBUG "LGCC: %p: | |         rate_prev_loop == 0x%llx\n", ca, ca->rate_prev_loop_ack_updated);
+                printk(KERN_DEBUG "LGCC: %p: | |          ca->max_rateS == 0x%llx\n", ca, ca->max_rateS);
+                printk(KERN_DEBUG "LGCC: %p: | |               min(...) == 0x%llx\n", ca, rate_prev_loop);
+        }
+        rate_prev_loop >>= LGCC_SHIFT;
 	/* Note to future Martin: I'm *very* certain the shift above is in the
 	 * correct direction! --Martin */
+        if (ca->debug) {
+                printk(KERN_DEBUG "LGCC: %p: | | min(...) >> LGCC_SHIFT == 0x%llx\n", ca, rate_prev_loop);
+                printk(KERN_DEBUG "LGCC: %p: | |         [ .:*~ vErY mAgIc FoRmUlA ~*:. ]\n", ca);
+        }
 
-	do_div(tmprate, min(rate_prev_loop, ca->mrate));
+	do_div(tmprate, rate_prev_loop);
 
 	u32 first_term = lgc_log_lut_lookup((u32)tmprate);
 	u32 second_term = lgc_log_lut_lookup((u32)(65536U - ca->fraction));
@@ -237,7 +249,8 @@ static void lgcc_update_rate(struct sock *sk)
 	 */
 	WRITE_ONCE(ca->rate, rate);
 
-        /* printk(KERN_DEBUG "LGCC: lgcc_update_rate: 0x%llx\n", ca->rate); */
+        if (ca->debug)
+                printk(KERN_DEBUG "LGCC: %p: | | -->     final new rate == 0x%llx\n", ca, ca->rate);
 }
 
 /* Calculate cwnd based on current rate and minRTT
@@ -254,14 +267,30 @@ static void lgcc_set_cwnd(struct sock *sk)
 
 	tp->snd_cwnd = max_t(u32, (u32)target + 1, 2U);
 
+        if (ca->debug) {
+                printk(KERN_DEBUG "LGCC: %p: | lgcc_set_cwnd():\n", ca);
+                printk(KERN_DEBUG "LGCC: %p: | |      rate == 0x%llx\n", ca, ca->rate);
+                printk(KERN_DEBUG "LGCC: %p: | |    minRTT == 0x%x\n", ca, ca->minRTT);
+                printk(KERN_DEBUG "LGCC: %p: | | mms_cache == 0x%x\n", ca, tp->mss_cache);
+                printk(KERN_DEBUG "LGCC: %p: | |    target == do_div((ca->rate * ca->minRTT >> LGCC_SHIFT),\n", ca);
+                printk(KERN_DEBUG "LGCC: %p: | |                                     tp->mss_cache * 1000)\n", ca);
+                printk(KERN_DEBUG "LGCC: %p: | |           == 0x%llx\n", ca, target);
+                printk(KERN_DEBUG "LGCC: %p: | |      cwnd == max_t(u32, (u32)target + 1, 2U)\n", ca);
+                printk(KERN_DEBUG "LGCC: %p: | | -->       == 0x%x\n", ca, tp->snd_cwnd);
+        }
+
+        /* `clamp` is by default a u32 max value */
 	if (tp->snd_cwnd > tp->snd_cwnd_clamp)
 		tp->snd_cwnd = tp->snd_cwnd_clamp;
 
-	target = (u64)(tp->snd_cwnd * tp->mss_cache * 1000);
-	target <<= LGCC_SHIFT;
-	do_div(target, ca->minRTT);
+        /* TODO: Why is the below set? On the next rate calculation, it will be
+         *       discarded anyway, right? I'm commenting out for now.
+         *                                                ---Martin 24.10.21 */
+	/* target = (u64)(tp->snd_cwnd * tp->mss_cache * 1000); */
+	/* target <<= LGCC_SHIFT; */
+	/* do_div(target, ca->minRTT); */
 
-	WRITE_ONCE(ca->rate, target);
+	/* WRITE_ONCE(ca->rate, target); */
 }
 
 /* Get the rate of the last rate, as advertised in the last received ACK. This
@@ -271,10 +300,9 @@ void tcp_lgcc_get_rate_prev_loop(struct sock *sk, u32 flags)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct lgcc *ca = inet_csk_ca(sk);
 
-        /* TODO: should this be dampened? (Peymant's code multiplies by 0.8, I think.) */
 	WRITE_ONCE(ca->rate_prev_loop_ack_updated, tp->rx_opt.lgcc_rate);
         /* if (get_random_u32() % 1000 == 0) */
-        /*         printk(KERN_DEBUG "LGCC: recieved rate from ACK: 0x%llx\n", ca->rate_prev_loop_ack_updated); */
+        /*         printk(KERN_DEBUG "LGCC: %p: recieved rate from ACK: 0x%llx\n", ca, ca->rate_prev_loop_ack_updated); */
 }
 
 /* Parse TCP option, and store the advertized rate in the CA state. Called by the LGCC router (PEP-DNA). */
@@ -289,7 +317,7 @@ void tcp_lgcc_set_rate_prev_loop(struct tcp_sock *from, struct sock *to)
         WRITE_ONCE(ca->rate_prev_loop_router_updated, ((struct lgcc *)(from->inet_conn.icsk_ca_priv))->rate);
 
         /* if (get_random_u32() % 1000 == 0) */
-        /*         printk(KERN_DEBUG "LGCC: setting rate_prev_loop_router_updated: 0x%llx\n", ((struct lgcc *)(from->inet_conn.icsk_ca_priv))->rate); */
+        /*         printk(KERN_DEBUG "LGCC: %p: setting rate_prev_loop_router_updated: 0x%llx\n", from, ((struct lgcc *)(from->inet_conn.icsk_ca_priv))->rate); */
 }
 EXPORT_SYMBOL(tcp_lgcc_set_rate_prev_loop);
 
@@ -336,7 +364,6 @@ __bpf_kfunc static void lgcc_cwnd_event(struct sock *sk, enum tcp_ca_event ev)
  * via the cwnd primarily, not ssthresh. */
 static u32 tcp_lgcc_ssthresh(struct sock *sk)
 {
-	struct lgcc *ca = inet_csk_ca(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
 
 	return max(tcp_snd_cwnd(tp), 2U);
@@ -350,8 +377,21 @@ static void tcp_lgcc_main(struct sock *sk, const struct rate_sample *rs)
 	/* Expired RTT */
 	if (!before(tp->snd_una, ca->next_seq)) {
 
-                if (ca->static_rtt != 0)
+                /* XXX: Small chance of setting the debug flag, which prints 
+                 * calculations.                        ---Martin 10/22 */
+                if (get_random_u32() % 1000 == 0) {
+                        ca->debug = true;
+                        printk(KERN_DEBUG "LGCC: %p: tcp_lgcc_main():\n", ca);
+                }
+
+                if (ca->static_rtt == false) {
                         ca->minRTT = min_not_zero(tcp_min_rtt(tp), ca->minRTT);
+                        if (ca->debug) {
+                                if (tcp_min_rtt(tp) < 100)
+                                        printk(KERN_DEBUG "LGCC: %p: | !!! Dynamic RTT is very small. Meaning it is probably unavalible !!!\n", ca);
+                                printk(KERN_DEBUG "LGCC: %p: | tcp_min_rtt(tp) == 0x%x\n", ca, tcp_min_rtt(tp));
+                        }
+                }
 		/* The above may be disabled, since the use of a PEP in LGCC mess with the
 		 * built-in min-RTT calculation. We have to assume the sysctl setting
 		 * is correct instead.   --Martin */
@@ -363,6 +403,9 @@ static void tcp_lgcc_main(struct sock *sk, const struct rate_sample *rs)
 		lgcc_set_cwnd(sk);
                 /* lgcc_update_pacing_rate(sk); */
 		lgcc_reset(tp, ca);
+
+                /* XXX: Unset debug flag */
+                if (ca->debug) ca->debug = false;
 	}
 }
 
