@@ -4236,14 +4236,12 @@ void tcp_parse_options(const struct net *net,
 				opt_rx->saw_unknown = 1;
 				break;
 
-            case TCPOPT_LGCC:
-                /* TODO: should check sysctl option too */
-                /* TODO: should check if `estab` */
-                if (opsize == TCPOLEN_LGCC) {
-                        opt_rx->lgcc_ok = 1;
-                        opt_rx->lgcc_rate = get_unaligned_be64(ptr);
-                }
-                break;
+			case TCPOPT_LGCC:
+				if (opsize == TCPOLEN_LGCC) {
+					opt_rx->lgcc_ok = 1;
+					opt_rx->lgcc_rate = get_unaligned_be64(ptr);
+				}
+				break;
 
 			default:
 				opt_rx->saw_unknown = 1;

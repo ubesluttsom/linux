@@ -758,16 +758,15 @@ static void tcp_options_write(struct tcphdr *th, struct tcp_sock *tp,
 	mptcp_options_write(th, ptr, tp, opts);
 
 	/* Add experimental LGCC option for advertising rate. Only sendt on
-         * ACKs and SYNs. Make sure to align it properly too. */
+	 * ACKs and SYNs. Make sure to align it properly too. */
 	if (OPTION_LGCC & options) {
-		u64 rate = tp ? tcp_lgcc_get_rate(tp) : 0xAFFFFFFFFFFFFFFA;
-                *ptr++ = htonl((TCPOPT_NOP << 24) |
-                                (TCPOPT_NOP << 16) |
-                                (TCPOPT_LGCC << 8) |
-                                TCPOLEN_LGCC);
-                *ptr++ = htonl((rate >> 32) & 0x00000000FFFFFFFF);
-                *ptr++ = htonl( rate        & 0x00000000FFFFFFFF);
-        }
+		u64 rate = tp ? tcp_lgcc_get_rate(tp) : 0xFFFFFFFFFFFFFFFF;
+		*ptr++ = htonl((TCPOPT_NOP << 24) |
+			       (TCPOPT_NOP << 16) |
+			       (TCPOPT_LGCC << 8) | TCPOLEN_LGCC);
+		*ptr++ = htonl((rate >> 32) & 0x00000000FFFFFFFF);
+		*ptr++ = htonl(rate & 0x00000000FFFFFFFF);
+	}
 }
 
 static void smc_set_option(const struct tcp_sock *tp,
@@ -899,17 +898,13 @@ static unsigned int tcp_syn_options(struct sock *sk, struct sk_buff *skb,
 		}
 	}
 
-	/* Enable LGCC TCP option if using LGCC as congestion control. */
-	/* TODO: Does `sock_net(sk)->ipv4.tcp_congestion_control->name` need
-         * a `READ_ONCE(...)` wrapper? */
-	/* TODO: This check is probably slow. */
-	/* We also need to check if we have space in the header. */
-	const char *cc_name = sock_net(sk)->ipv4.tcp_congestion_control->name;
-        if (unlikely(strcmp("lgcc", cc_name) == 0) &&
-                        (remaining >= TCPOLEN_LGCC_ALIGNED)) {
-                opts->options |= OPTION_LGCC;
-                remaining -= TCPOLEN_LGCC_ALIGNED;
-        }
+	/* Enable LGCC TCP option if using LGCC as congestion control. We also
+	 * need to check if we have space in the header. */
+	if (!strcmp("lgcc", sock_net(sk)->ipv4.tcp_congestion_control->name)
+	    && remaining >= TCPOLEN_LGCC_ALIGNED) {
+		opts->options |= OPTION_LGCC;
+		remaining -= TCPOLEN_LGCC_ALIGNED;
+	}
 
 	bpf_skops_hdr_opt_len(sk, skb, NULL, NULL, 0, opts, &remaining);
 
@@ -984,17 +979,14 @@ static unsigned int tcp_synack_options(const struct sock *sk,
 
 	smc_set_option_cond(tcp_sk(sk), ireq, opts, &remaining);
 
-	/* Enable LGCC TCP option if LGCC option has been recieved. */
-        if (ireq->lgcc_ok) {
-                /* TODO: This check is probably slow. */
-                const char *cc_name = sock_net(sk)->ipv4.tcp_congestion_control->name;
-                /* We also need to check if we have space in the header */
-                if ((remaining >= TCPOLEN_LGCC_ALIGNED) &&
-                                (strcmp("lgcc", cc_name) == 0)) {
-                        opts->options |= OPTION_LGCC;
-                        remaining -= TCPOLEN_LGCC_ALIGNED;
-                }
-        }
+	/* Enable LGCC TCP option if LGCC option has been recieved (in SYN),
+	 * are using LGCC as congestion control, and we have space for it. */
+	if (ireq->lgcc_ok
+	    && !strcmp("lgcc", sock_net(sk)->ipv4.tcp_congestion_control->name)
+	    && remaining >= TCPOLEN_LGCC_ALIGNED) {
+		opts->options |= OPTION_LGCC;
+		remaining -= TCPOLEN_LGCC_ALIGNED;
+	}
 
 	bpf_skops_hdr_opt_len((struct sock *)sk, skb, req, syn_skb,
 			      synack_type, opts, &remaining);
@@ -1065,18 +1057,19 @@ static unsigned int tcp_established_options(struct sock *sk, struct sk_buff *skb
 			opts->num_sack_blocks * TCPOLEN_SACK_PERBLOCK;
 	}
 
-        /* Enable LGCC TCP option. */
-        if (tp->rx_opt.lgcc_ok) {
-                /* TODO: This check is probably slow. */
-                const char *cc_name = sock_net(sk)->ipv4.tcp_congestion_control->name;
-                /* We also need to check if we have space in the header. */
-                unsigned int remaining = MAX_TCP_OPTION_SPACE - size;
-                if ((remaining >= TCPOLEN_LGCC_ALIGNED) &&
-                                (strcmp("lgcc", cc_name) == 0)) {
-                        opts->options |= OPTION_LGCC;
-                        size +=  TCPOLEN_LGCC_ALIGNED;
-                }
-        }
+	/* Enable LGCC TCP option on ACKs */
+	if (tp->rx_opt.lgcc_ok) {
+		/* If skb is NULL, then tcp_current_mss() is the caller. We 
+		 * want MSS consider the LGCC option. Therefore pass if-check.
+		 * Otherwise, only include option on packets with ACK flag. */
+		if (skb == NULL || (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_ACK)) {
+			unsigned int remaining = MAX_TCP_OPTION_SPACE - size;
+			if (remaining >= TCPOLEN_LGCC_ALIGNED) {
+				opts->options |= OPTION_LGCC;
+				size += TCPOLEN_LGCC_ALIGNED;
+			}
+		}
+	}
 
 	if (unlikely(BPF_SOCK_OPS_TEST_FLAG(tp,
 					    BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG))) {
