@@ -130,37 +130,6 @@ static void lgcc_init_rate(struct sock *sk)
 	ca->rate_eval = 1;
 }
 
-static void lgcc_update_pacing_rate(struct sock *sk)
-{
-	struct lgcc *ca = inet_csk_ca(sk);
-	const struct tcp_sock *tp = tcp_sk(sk);
-	u64 rate;
-
-	/* Set `sk_pacing_rate` to 100 % of current rate (mss * cwnd / rtt) */
-	rate = (u64)tp->mss_cache * ((USEC_PER_SEC / 100) << 3);
-	rate *= 100U;    /* set to 100 % */
-	rate *= max(tp->snd_cwnd, tp->packets_out);
-
-        /* For the RTT we have two options. I have tried both, and results are
-	 * about the same:
-         * (1) Use the innate TCP stack's calculated smoothed out RTT: */
-	if (likely(tp->srtt_us))
-		do_div(rate, tp->srtt_us);
-	/* (2) use the configured sysctl setting ... Assuming minimum RTT is a
-         *     substitute for mean RTT, which might be a bit iffy: */
-        /* do_div(rate, ca->minRTT); */
-
-	/* We can also try to not exceed the maximum configured LGC(C) rate. I
-         * tried this with no noticable benefit: */
-	/* rate = min(rate, ca->mrate * 1000); */
-
-	/* WRITE_ONCE() is needed because sch_fq fetches sk_pacing_rate
-	 * without any lock. We want to make sure compiler wont store
-	 * intermediate values in this location.
-	 */
-	WRITE_ONCE(sk->sk_pacing_rate, min_t(u64, rate, sk->sk_max_pacing_rate));
-}
-
 static void lgcc_update_rate(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -401,7 +370,6 @@ static void tcp_lgcc_main(struct sock *sk, const struct rate_sample *rs)
 
 		lgcc_update_rate(sk);
 		lgcc_set_cwnd(sk);
-                /* lgcc_update_pacing_rate(sk); */
 		lgcc_reset(tp, ca);
 
                 /* XXX: Unset debug flag */
