@@ -207,11 +207,11 @@ static void lgcc_set_cwnd(struct sock *sk)
 
 /* Get the rate of the next LGCC control loop, as advertised in the last
  * received ACK. This is executed every time we receive an ACK. */
-void tcp_lgcc_get_next_rate_from_ack(struct sock *sk, u32 flags)
+void tcp_lgcc_get_next_rate_from_ack(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct lgcc *ca = inet_csk_ca(sk);
-	WRITE_ONCE(ca->s_rx_next_rate, tp->rx_opt.lgcc_rate);
+	ca->s_rx_next_rate = tp->rx_opt.lgcc_rate;
 }
 
 /* Transfer the calculated rate to another socket, for it to transmit in the 
@@ -220,7 +220,7 @@ void tcp_lgcc_set_next_rate(struct sock *from, struct sock *to)
 {
 	struct lgcc *ca_to = inet_csk_ca(to);
 	struct lgcc *ca_from = inet_csk_ca(from);
-	WRITE_ONCE(ca_to->s_tx_next_rate, ca_from->s_rate);
+	ca_to->s_tx_next_rate = ca_from->s_rate;
 }
 
 EXPORT_SYMBOL(tcp_lgcc_set_next_rate);
@@ -269,6 +269,9 @@ static void tcp_lgcc_main(struct sock *sk, const struct rate_sample *rs)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct lgcc *ca = inet_csk_ca(sk);
 	bool rtt_expired;
+
+	/* Update the next LGCC control loop rate */
+	tcp_lgcc_get_next_rate_from_ack(sk);
 
 	if (ca->static_rtt)
 		/* With static RTT use an absolute measure */
@@ -321,7 +324,6 @@ static struct tcp_congestion_ops lgcc __read_mostly = {
 	.init = tcp_lgcc_init,
 	.cong_control = tcp_lgcc_main,
 	.cwnd_event = lgcc_cwnd_event,
-	.in_ack_event = tcp_lgcc_get_next_rate_from_ack,
 	.ssthresh = tcp_lgcc_ssthresh,
 	.undo_cwnd = tcp_reno_undo_cwnd,
 	.get_info = tcp_lgcc_get_info,
