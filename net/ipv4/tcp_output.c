@@ -760,7 +760,7 @@ static void tcp_options_write(struct tcphdr *th, struct tcp_sock *tp,
 	/* Add experimental LGCC option for advertising rate. Only sendt on
 	 * ACKs and SYNs. Make sure to align it properly too. */
 	if (OPTION_LGCC & options) {
-		u64 rate = tp ? tcp_lgcc_get_rate(tp) : 0xFFFFFFFFFFFFFFFF;
+		u64 rate = tp ? tcp_lgcc_get_next_rate(tp) : ULLONG_MAX;
 		*ptr++ = htonl((TCPOPT_NOP << 24) |
 			       (TCPOPT_NOP << 16) |
 			       (TCPOPT_LGCC << 8) | TCPOLEN_LGCC);

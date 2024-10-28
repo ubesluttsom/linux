@@ -12,7 +12,7 @@ extern int sysctl_lgcc_static_rtt[1] __read_mostly;
 inline int lgcc_register_sysctl(void);
 inline void lgcc_unregister_sysctl(void);
 
-u64 tcp_lgcc_get_rate(struct tcp_sock *tp);
-void tcp_lgcc_set_rate_prev_loop(struct tcp_sock *from, struct sock *to);
+u64 tcp_lgcc_get_next_rate(struct tcp_sock *tp);
+void tcp_lgcc_set_next_rate(struct sock *from, struct sock *to);
 
 #endif
