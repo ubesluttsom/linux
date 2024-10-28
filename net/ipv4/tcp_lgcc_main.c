@@ -222,7 +222,6 @@ void tcp_lgcc_set_next_rate(struct sock *from, struct sock *to)
 	struct lgcc *ca_from = inet_csk_ca(from);
 	ca_to->s_tx_next_rate = ca_from->s_rate;
 }
-
 EXPORT_SYMBOL(tcp_lgcc_set_next_rate);
 
 /* Get the rate we would like to transmit (for the LGCC TCP option). Called
@@ -232,7 +231,6 @@ u64 tcp_lgcc_get_next_rate(struct tcp_sock *tp)
 	struct lgcc *ca = ((struct lgcc *)(tp->inet_conn.icsk_ca_priv));
 	return ca->s_tx_next_rate;
 }
-
 EXPORT_SYMBOL(tcp_lgcc_get_next_rate);
 
 /* From the DCTCP implementation, with minor modifications. */
@@ -249,9 +247,6 @@ __bpf_kfunc static void lgcc_cwnd_event(struct sock *sk, enum tcp_ca_event ev)
 		/* Don't care for the rest. */
 		break;
 	}
-
-	/* Trigger the rate calculation */
-	lgcc_update_rate(sk);
 }
 
 /* XXX: A bit unsure if this is needed, and how to implement this. Now it
