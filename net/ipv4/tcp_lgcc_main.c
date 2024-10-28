@@ -179,9 +179,7 @@ static void lgcc_update_rate(struct sock *sk)
 	if (s_rate > ca->s_max_rate)
 		s_rate = ca->s_max_rate;
 
-	/* s_rate can be read from lgcc_get_info() without synchronisation, 
-	 * so we ask compiler to not use rate as a temporary variable in prior
-	 * operations. */
+	/* s_rate can be read from lgcc_get_info() without synchronisation */
 	WRITE_ONCE(ca->s_rate, s_rate);
 }
 
